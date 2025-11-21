@@ -1,0 +1,37 @@
+{
+  "name": "crypto-price-monitor",
+  "version": "1.0.0",
+  "description": "crypto价格监控与波动提醒工具 - 基于Binance API的加密货币价格监控系统",
+  "main": "crypto-tracker.js",
+  "scripts": {
+    "start": "set HTTPS_PROXY=http://127.0.0.1:7897 && node crypto-tracker.js",
+    "dev": "node crypto-tracker.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "cryptocurrency",
+    "price-monitor",
+    "binance",
+    "crypto",
+    "trading",
+    "notification",
+    "alert"
+  ],
+  "author": "zgc <zgc7788@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/crypto-price-monitor.git"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "devDependencies": {},
+  "homepage": "https://github.com/your-username/crypto-price-monitor#readme",
+  "bugs": {
+    "url": "https://github.com/your-username/crypto-price-monitor/issues"
+  }
+}
