@@ -1,0 +1,49 @@
+{
+  "COINS": [
+    {
+      "symbol": "PIEVERSEUSDT",
+      "name": "PIEVERSE"
+    },
+    {
+      "symbol": "TACUSDT",
+      "name": "TAC"
+    },
+    {
+      "symbol": "HANAUSDT",
+      "name": "HANA"
+    },
+    {
+      "symbol": "MONUSDT",
+      "name": "MON"
+    },
+    {
+      "symbol": "RVVUSDT",
+      "name": "RVV"
+    }
+  ],
+  "REST_BASE_URL": "https://fapi.binance.com",
+  "PRICE_CHANGE_THRESHOLD": 0.02,
+  "PUSH_API_KEY": [
+    "HNfKcdiSRkB2MUpWS6CNCj",
+    "npcnSihKPidjybmp8kiDR3"
+  ],
+  "PUSH_API_URL": "https://api.day.app",
+  "MAX_FAILED_ATTEMPTS": 10,
+  "TIME_CONTROL": {
+    "INTERVAL": 10000,
+    "SYNC_INTERVAL": 1000,
+    "TARGET_SECONDS": [0, 10, 20, 30, 40, 50],
+    "ALLOWED_TIME_DEVIATION": 500
+  },
+  "TREND_ANALYSIS": {
+    "TIME_WINDOW": 30,
+    "MIN_DATA_POINTS": 8,
+    "TREND_THRESHOLD": 0.015,
+    "VOLATILITY_THRESHOLD": 0.03,
+    "BREAKOUT_THRESHOLD": 0.025,
+    "RSI_PERIOD": 14,
+    "RSI_OVERBOUGHT": 80,
+    "RSI_OVERSOLD": 20,
+    "RSI_ALERT_COOLDOWN": 300000
+  }
+}

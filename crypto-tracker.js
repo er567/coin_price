@@ -12,8 +12,10 @@ const axios = require('axios');
 // 可配置参数 - 在这里修改监控的币种和相关设置
 const CONFIG = {
   COINS: [
+    { symbol: 'PIEVERSEUSDT', name: 'PIEVERSE' },
     { symbol: 'BEATUSDT', name: 'BEAT' },
-    { symbol: 'TNSRUSDT', name: 'TNSR' },
+    { symbol: 'HANAUSDT', name: 'HANA' },
+    { symbol: 'MONSDT', name: 'MON' },
   ],                    // 监控的币种列表
   REST_BASE_URL: 'https://fapi.binance.com',
   CHECK_INTERVAL: 20000,          // 单个币种监控间隔（毫秒）

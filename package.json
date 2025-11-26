@@ -5,7 +5,7 @@
   "main": "crypto-tracker.js",
   "scripts": {
     "start": "set HTTPS_PROXY=http://127.0.0.1:7897 && node crypto-tracker.js",
-    "dev": "node crypto-tracker.js",
+    "dev": "set HTTPS_PROXY=http://127.0.0.1:7897 && node analysis.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
