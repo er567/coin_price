@@ -1,28 +1,42 @@
 {
   "COINS": [
     {
-      "symbol": "PIEVERSEUSDT",
-      "name": "PIEVERSE"
+      "symbol": "IRYSUSDT",
+      "name": "IRYS"
     },
     {
-      "symbol": "TACUSDT",
-      "name": "TAC"
+      "symbol": "PIPPINUSDT",
+      "name": "PIPPIN"
     },
     {
-      "symbol": "HANAUSDT",
-      "name": "HANA"
+      "symbol": "SQDUSDT",
+      "name": "SQD"
     },
-    {
-      "symbol": "MONUSDT",
-      "name": "MON"
-    },
-    {
-      "symbol": "RVVUSDT",
-      "name": "RVV"
-    }
+    { "symbol": "MUSDT", "name": "M" },
+    { "symbol": "ICNTUSDT", "name": "ICNT" },
+    { "symbol": "CROSSUSDT", "name": "CROSS" },
+    { "symbol": "AINUSDT", "name": "AIN" },
+    { "symbol": "FOLKSUSDT", "name": "FOLKS" },
+    { "symbol": "BGSCUSDT", "name": "BGSC" },
+    { "symbol": "LONGUSDT", "name": "LONG" },
+    { "symbol": "SENTISUSDT", "name": "SENTIS" },
+    { "symbol": "TRUSTUSDT", "name": "TRUST" },
+    { "symbol": "TYCOONUSDT", "name": "TYCOON" },
+    { "symbol": "KITEUSDT", "name": "KITE" },
+    { "symbol": "TITNUSDT", "name": "TITN" },
+    { "symbol": "OIKUSDT", "name": "OIK" },
+    { "symbol": "BEATUSDT", "name": "BEAT" },
+    { "symbol": "BAYUSDT", "name": "BAY" },
+    { "symbol": "NBUSDT", "name": "NB" },
+    { "symbol": "CUSDT", "name": "C" },
+    { "symbol": "PEAQUSDT", "name": "PEAQ" },
+    { "symbol": "SPAUSDT", "name": "SPA" },
+    { "symbol": "RIONUSDT", "name": "RION" },
+    { "symbol": "TACUSDT", "name": "TAC" },
+    { "symbol": "TAKERUSDT", "name": "TAKER" }
   ],
   "REST_BASE_URL": "https://fapi.binance.com",
-  "PRICE_CHANGE_THRESHOLD": 0.02,
+  "PRICE_CHANGE_THRESHOLD": 0.04,
   "PUSH_API_KEY": [
     "HNfKcdiSRkB2MUpWS6CNCj",
     "npcnSihKPidjybmp8kiDR3"
@@ -42,8 +56,14 @@
     "VOLATILITY_THRESHOLD": 0.03,
     "BREAKOUT_THRESHOLD": 0.025,
     "RSI_PERIOD": 14,
-    "RSI_OVERBOUGHT": 80,
-    "RSI_OVERSOLD": 20,
-    "RSI_ALERT_COOLDOWN": 300000
+    "RSI_OVERBOUGHT": 90,
+    "RSI_OVERSOLD": 10,
+    "RSI_ALERT_COOLDOWN": 300000,
+    "ENHANCED_TREND": {
+      "LONG_MOMENTUM_THRESHOLD": 0.05,
+      "MACD_HIST_WEAK": 0.002,
+      "MACD_HIST_STRONG": 0.006,
+      "MIN_DATA_POINTS_FOR_MACD": 60
+    }
   }
 }

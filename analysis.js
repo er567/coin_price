@@ -20,7 +20,7 @@ const DEFAULT_CONFIG = {
     { symbol: 'PIEVERSEUSDT', name: 'PIEVERSE' },
   ],
   REST_BASE_URL: 'https://fapi.binance.com',
-  PRICE_CHANGE_THRESHOLD: 0.02,
+  PRICE_CHANGE_THRESHOLD: 0.04,
   PUSH_API_KEY: ['HNfKcdiSRkB2MUpWS6CNCj', 'npcnSihKPidjybmp8kiDR3'],
   PUSH_API_URL: 'https://api.day.app',
   MAX_FAILED_ATTEMPTS: 10,
@@ -63,14 +63,14 @@ class EnhancedTrendAnalyzer {
    */
   calculateEMA(prices, period) {
     if (prices.length < period) return null;
-    
+
     const multiplier = 2 / (period + 1);
     let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    
+
     for (let i = period; i < prices.length; i++) {
       ema = (prices[i] - ema) * multiplier + ema;
     }
-    
+
     return ema;
   }
 
@@ -79,20 +79,20 @@ class EnhancedTrendAnalyzer {
    */
   calculateMACD(prices) {
     if (prices.length < 26) return null;
-    
+
     const ema12 = this.calculateEMA(prices, 12);
     const ema26 = this.calculateEMA(prices, 26);
-    
+
     if (ema12 === null || ema26 === null) return null;
-    
+
     const macdLine = ema12 - ema26;
-    
+
     // 计算信号线（9周期EMA）
     const signalPrices = prices.slice(-9); // 简化计算，使用最近9个价格
     const signalLine = this.calculateEMA(signalPrices, 9);
-    
+
     const histogram = macdLine - signalLine;
-    
+
     return {
       macd: macdLine,
       signal: signalLine,
@@ -106,7 +106,7 @@ class EnhancedTrendAnalyzer {
   calculatePriceChanges(prices) {
     const changes = [];
     for (let i = 1; i < prices.length; i++) {
-      changes.push(prices[i] - prices[i-1]);
+      changes.push(prices[i] - prices[i - 1]);
     }
     return changes;
   }
@@ -162,20 +162,20 @@ class EnhancedTrendAnalyzer {
     }
 
     const prices = trendData.map(item => item.price);
-    
+
     // 计算各种技术指标
     const smaShort = this.calculateSMA(prices.slice(-10)); // 10周期SMA
     const smaMedium = this.calculateSMA(prices.slice(-20)); // 20周期SMA
     const smaLong = this.calculateSMA(prices); // 全周期SMA
-    
+
     const emaFast = this.calculateEMA(prices, 12);
     const emaSlow = this.calculateEMA(prices, 26);
-    
+
     const macd = this.calculateMACD(prices);
     const rsi = this.calculateRSI(priceChanges);
-    
+
     const longMomentumRatio = currentPrice / smaLong;
-    
+
     return {
       prices: prices,
       currentPrice: currentPrice,
@@ -226,13 +226,13 @@ class EnhancedTrendAnalyzer {
       emaBullish: ema.fast > ema.slow && currentPrice > ema.fast,
       macdBullish: macd && macd.histogram >= THRESHOLDS.MACD_HIST_WEAK,
       rsiNotOverbought: rsi < THRESHOLDS.RSI_OVERBOUGHT,
-      
+
       // 空头条件
       shortMomentum: longMomentumRatio < (1 - THRESHOLDS.LONG_MOMENTUM),
       emaBearish: ema.fast < ema.slow && currentPrice < ema.fast,
       macdBearish: macd && macd.histogram <= THRESHOLDS.MACD_HIST_WEAK,
       rsiNotOversold: rsi > THRESHOLDS.RSI_OVERSOLD,
-      
+
       // 强度条件
       strongBullishMACD: macd && macd.histogram >= THRESHOLDS.MACD_HIST_STRONG,
       strongBearishMACD: macd && macd.histogram <= -THRESHOLDS.MACD_HIST_STRONG,
@@ -253,7 +253,7 @@ class EnhancedTrendAnalyzer {
       conditions.rsiNotOverbought
     ].filter(Boolean).length;
 
-    const veryStrongBullish = strongBullishConditions >= 3 && 
+    const veryStrongBullish = strongBullishConditions >= 3 &&
       (conditions.strongBullishMACD || conditions.veryBullishMomentum);
 
     // 检查强烈空头信号
@@ -264,7 +264,7 @@ class EnhancedTrendAnalyzer {
       conditions.rsiNotOversold
     ].filter(Boolean).length;
 
-    const veryStrongBearish = strongBearishConditions >= 3 && 
+    const veryStrongBearish = strongBearishConditions >= 3 &&
       (conditions.strongBearishMACD || conditions.veryBearishMomentum);
 
     // 生成信号
@@ -294,7 +294,7 @@ class EnhancedTrendAnalyzer {
       reason = ['空头信号初现', '技术指标偏空'];
     } else {
       // 中性市场条件
-      const isNeutralMarket = 
+      const isNeutralMarket =
         Math.abs(longMomentumRatio - 1) < THRESHOLDS.LONG_MOMENTUM * 0.5 &&
         Math.abs(ema.fast - ema.slow) / currentPrice < 0.01 &&
         macd && Math.abs(macd.histogram) < THRESHOLDS.MACD_HIST_STRONG * 0.5 &&
@@ -644,6 +644,10 @@ class MultiCryptoPriceMonitor {
    * 精确时间控制的价格获取（用于正常监控周期）
    */
   async fetchPriceWithTimeControl(symbol, name) {
+    // 添加随机延迟，避免并发请求
+    const randomDelay = Math.floor(Math.random() * 2000); // 0-2秒随机延迟
+    await new Promise(resolve => setTimeout(resolve, randomDelay));
+    
     const coinInfo = this.coinData.get(symbol);
 
     try {
@@ -871,7 +875,7 @@ class MultiCryptoPriceMonitor {
    */
   async sendTrendChangeAlert(coinInfo, analysis) {
     const now = new Date().getTime();
-    
+
     // 避免频繁发送提醒（至少间隔3分钟）
     if (coinInfo.lastTrendAlert && (now - coinInfo.lastTrendAlert < 3 * 60 * 1000)) {
       return;
@@ -879,7 +883,7 @@ class MultiCryptoPriceMonitor {
 
     // 使用增强趋势分析
     const enhancedAnalysis = this.trendAnalyzer.analyzeEnhancedTrend(
-      coinInfo.trendData, 
+      coinInfo.trendData,
       analysis.currentPrice,
       coinInfo.priceChanges
     );
@@ -892,7 +896,7 @@ class MultiCryptoPriceMonitor {
     const tradingSignal = this.trendAnalyzer.generateTradingSignal(enhancedAnalysis);
 
     // 只在信号明确时发送提醒（避免过多的HOLD信号）
-    if (tradingSignal.signal !== 'HOLD' || tradingSignal.confidence === 'CONVICTION') {
+    if (tradingSignal.signal !== 'HOLD' && tradingSignal.confidence === 'HIGH') {
       await this.sendTradingSignalAlert(analysis, enhancedAnalysis, tradingSignal);
       coinInfo.lastTrendAlert = now;
       coinInfo.lastTradingSignalAlert = now;
@@ -908,11 +912,11 @@ class MultiCryptoPriceMonitor {
    */
   async sendTradingSignalAlert(analysis, enhancedAnalysis, tradingSignal) {
     const { signal, confidence, reason, technicals } = tradingSignal;
-    
+
     let title = '';
     let emoji = '';
-    
-    switch(signal) {
+
+    switch (signal) {
       case 'BUY':
         emoji = confidence === 'CONVICTION' ? '🚀' : '📈';
         title = `${emoji} ${analysis.name}买入信号 (${confidence})`;
@@ -1044,12 +1048,12 @@ ${analysis.name}RSI进入超卖区域!
    */
   async sendTrendAlert(analysis) {
     const coinInfo = this.coinData.get(analysis.symbol);
-    
+
     // 只使用增强的趋势分析
     await this.sendTrendChangeAlert(coinInfo, analysis);
     await this.sendRsiAlert(coinInfo, analysis);
-    
-}
+
+  }
 
   /**
    * 检查价格变化和趋势（用于正常监控周期）
@@ -1067,15 +1071,29 @@ ${analysis.name}RSI进入超卖区域!
       console.log(`[${this.getCurrentTimeString()}] ${name}价格变化: ${priceChange > 0 ? '+' : ''}${priceChange.toFixed(5)} USDT (${(priceChangePercent * 100).toFixed(2)}%)`);
 
       if (priceChangePercent >= this.config.PRICE_CHANGE_THRESHOLD) {
-        const direction = priceChange > 0 ? '上涨' : '下跌';
-        const message = `[${this.getCurrentTimeString()}]
+        const now = Date.now();
+
+        // 修改这里：将10分钟改为1分钟
+        if (!coinInfo.lastPriceAlert || (now - coinInfo.lastPriceAlert > 2 * 60 * 1000)) {
+          const direction = priceChange > 0 ? '上涨' : '下跌';
+          const message = `[${this.getCurrentTimeString()}]
 ${name}价格${direction}${(priceChangePercent * 100).toFixed(2)}%
 当前价格: ${coinInfo.currentPrice} USDT
 上次价格: ${coinInfo.lastPrice} USDT`;
-        this.sendPushNotification(
-          `${name}价格${direction}波动提醒`,
-          message
-        );
+
+          await this.sendPushNotification(
+            `${name}价格${direction}波动提醒`,
+            message
+          );
+
+          // 记录最后一次价格提醒时间
+          coinInfo.lastPriceAlert = now;
+          console.log(`[${this.getCurrentTimeString()}] ✅ 已发送${name}价格波动提醒`);
+        } else {
+          // 这里也需要修改剩余时间计算
+          const remainingSeconds = Math.ceil((1 * 60 * 1000 - (now - coinInfo.lastPriceAlert)) / 1000);
+          console.log(`[${this.getCurrentTimeString()}] ⏰ ${name}价格提醒冷却中，${remainingSeconds}秒后可再次提醒`);
+        }
       }
     }
 
@@ -1259,11 +1277,11 @@ ${initialPrices.join('\n')}`
       finalPrices.push(`${coin.name}: ${coinInfo.currentPrice || '未知'} USDT`);
       finalTrends.push(`${coin.name}: ${coinInfo.trendState}`);
       finalRSI.push(`${coin.name}: ${coinInfo.rsi !== null ? coinInfo.rsi.toFixed(2) : '无数据'}`);
-      
-      const signal = coinInfo.currentTradingSignal ? 
+
+      const signal = coinInfo.currentTradingSignal ?
         `${coinInfo.currentTradingSignal.signal} (${coinInfo.currentTradingSignal.confidence})` : '无信号';
       finalSignals.push(`${coin.name}: ${signal}`);
-      
+
       fetchStats.push(`${coin.name}: ${coinInfo.fetchCount}次`);
     }
 
