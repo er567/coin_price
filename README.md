@@ -79,7 +79,8 @@ npm install axios
 
 ### 3. 运行监控
 ```bash
-node analysis.js
+// 默认走本地的代理，目前默认为127.0.0.1:7897
+npm run dev
 ```
 
 ## 配置说明
