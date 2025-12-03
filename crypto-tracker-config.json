@@ -1,42 +1,12 @@
 {
   "COINS": [
-    {
-      "symbol": "IRYSUSDT",
-      "name": "IRYS"
-    },
-    {
-      "symbol": "PIPPINUSDT",
-      "name": "PIPPIN"
-    },
-    {
-      "symbol": "SQDUSDT",
-      "name": "SQD"
-    },
-    { "symbol": "MUSDT", "name": "M" },
-    { "symbol": "ICNTUSDT", "name": "ICNT" },
-    { "symbol": "CROSSUSDT", "name": "CROSS" },
-    { "symbol": "AINUSDT", "name": "AIN" },
-    { "symbol": "FOLKSUSDT", "name": "FOLKS" },
-    { "symbol": "BGSCUSDT", "name": "BGSC" },
-    { "symbol": "LONGUSDT", "name": "LONG" },
-    { "symbol": "SENTISUSDT", "name": "SENTIS" },
-    { "symbol": "TRUSTUSDT", "name": "TRUST" },
-    { "symbol": "TYCOONUSDT", "name": "TYCOON" },
-    { "symbol": "KITEUSDT", "name": "KITE" },
-    { "symbol": "TITNUSDT", "name": "TITN" },
-    { "symbol": "OIKUSDT", "name": "OIK" },
-    { "symbol": "BEATUSDT", "name": "BEAT" },
-    { "symbol": "BAYUSDT", "name": "BAY" },
-    { "symbol": "NBUSDT", "name": "NB" },
-    { "symbol": "CUSDT", "name": "C" },
-    { "symbol": "PEAQUSDT", "name": "PEAQ" },
-    { "symbol": "SPAUSDT", "name": "SPA" },
-    { "symbol": "RIONUSDT", "name": "RION" },
-    { "symbol": "TACUSDT", "name": "TAC" },
-    { "symbol": "TAKERUSDT", "name": "TAKER" }
+    { "symbol": "PIPPINUSDT", "name": "PIPPIN" },
+    { "symbol": "PIEVERSEUSDT", "name": "PIEVERSE" },
+    { "symbol": "UAIUSDT", "name": "UAI" },
+    { "symbol": "ZECUSDT", "name": "ZEC" }
   ],
   "REST_BASE_URL": "https://fapi.binance.com",
-  "PRICE_CHANGE_THRESHOLD": 0.04,
+  "PRICE_CHANGE_THRESHOLD": 0.02,
   "PUSH_API_KEY": [
     "HNfKcdiSRkB2MUpWS6CNCj",
     "npcnSihKPidjybmp8kiDR3"
@@ -50,20 +20,48 @@
     "ALLOWED_TIME_DEVIATION": 500
   },
   "TREND_ANALYSIS": {
-    "TIME_WINDOW": 30,
+    "TIME_WINDOW": 10,
     "MIN_DATA_POINTS": 8,
     "TREND_THRESHOLD": 0.015,
     "VOLATILITY_THRESHOLD": 0.03,
     "BREAKOUT_THRESHOLD": 0.025,
     "RSI_PERIOD": 14,
-    "RSI_OVERBOUGHT": 90,
-    "RSI_OVERSOLD": 10,
+    "RSI_OVERBOUGHT": 85,
+    "RSI_OVERSOLD": 15,
     "RSI_ALERT_COOLDOWN": 300000,
     "ENHANCED_TREND": {
-      "LONG_MOMENTUM_THRESHOLD": 0.05,
+      "LONG_MOMENTUM_THRESHOLD": 0.03,
       "MACD_HIST_WEAK": 0.002,
-      "MACD_HIST_STRONG": 0.006,
-      "MIN_DATA_POINTS_FOR_MACD": 60
+      "MACD_HIST_STRONG": 0.004,
+      "MIN_DATA_POINTS_FOR_MACD": 20,
+      
+      "MCAD_TURNING_POINT": {
+        "ZERO_CROSS_THRESHOLD": 0.0005,
+        "DIVERGENCE_LOOKBACK": 5,
+        "HISTOGRAM_REVERSAL_RATIO": 0.3,
+        "CONFIRMATION_CANDLES": 2
+      },
+      
+      "BOLLINGER_BANDS": {
+        "PERIOD": 20,
+        "STD_DEV": 2,
+        "BAND_SQUEEZE_THRESHOLD": 0.1
+      }
+    }
+  },
+  "TRADING": {
+    "DEFAULT_POSITION_SIZE": 100,
+    "DEFAULT_LEVERAGE": 1,
+    "TAKE_PROFIT_RATIO": 0.03,
+    "STOP_LOSS_RATIO": 0.02,
+    "MAX_TRADES_PER_COIN": 3,
+    "MIN_SIGNAL_INTERVAL": 180000,
+    "TRADE_LOG_FILE": "trading_log.json",
+    "TURNING_POINT_TRADING": {
+      "BOTTOM_CONFIRMATION_CANDLES": 2,
+      "TOP_CONFIRMATION_CANDLES": 1,
+      "REENTRY_ALLOWANCE": 0.005,
+      "STOP_LOSS_TIGHTENING": 0.5
     }
   }
 }

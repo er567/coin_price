@@ -4,7 +4,7 @@
  * @LastEditors: zgc zgc7788@gmail.com
  * @LastEditTime: 2025-11-26 11:30:55
  * @FilePath: \test\crypto-tracker.js
- * @Description: 加密货币价格监控与趋势分析工具 - 多币种版本（含RSI指标和增强趋势分析）
+ * @Description: 加密货币价格监控与趋势分析工具 - 多币种版本（含RSI指标、增强趋势分析和模拟交易）
  */
 
 const axios = require('axios');
@@ -40,22 +40,63 @@ const DEFAULT_CONFIG = {
     RSI_OVERBOUGHT: 80,
     RSI_OVERSOLD: 20,
     RSI_ALERT_COOLDOWN: 300000,
-    // 新增增强趋势分析配置
+
+    // 优化增强趋势分析配置
     ENHANCED_TREND: {
-      LONG_MOMENTUM_THRESHOLD: 0.02, // 2% 长周期动量阈值
+      LONG_MOMENTUM_THRESHOLD: 0.02,
       MACD_HIST_WEAK: 0,
       MACD_HIST_STRONG: 0.001,
-      MIN_DATA_POINTS_FOR_MACD: 26 // MACD需要更多数据点
+      MIN_DATA_POINTS_FOR_MACD: 26,
+
+      // 新增MCAD转折点配置
+      MCAD_TURNING_POINT: {
+        ZERO_CROSS_THRESHOLD: 0.0005,     // 零轴交叉阈值
+        DIVERGENCE_LOOKBACK: 5,           // 背离检测回看周期
+        HISTOGRAM_REVERSAL_RATIO: 0.3,    // 直方图反转比例
+        CONFIRMATION_CANDLES: 2           // 确认K线数量
+      },
+
+      // 新增布林带配置
+      BOLLINGER_BANDS: {
+        PERIOD: 20,
+        STD_DEV: 2,
+        BAND_SQUEEZE_THRESHOLD: 0.1       // 布林带收缩阈值
+      },
+
+      // 新增KDJ配置
+      KDJ: {
+        PERIOD: 9,
+        SLOW_K: 3,
+        SLOW_D: 3
+      }
+    }
+  },
+  TRADING: {
+    DEFAULT_POSITION_SIZE: 100,
+    DEFAULT_LEVERAGE: 1,
+    TAKE_PROFIT_RATIO: 0.02,
+    STOP_LOSS_RATIO: 0.01,
+    MAX_TRADES_PER_COIN: 3,
+    MIN_SIGNAL_INTERVAL: 180000,
+    TRADE_LOG_FILE: "trading_log.json",
+
+    // 新增转折点交易配置
+    TURNING_POINT_TRADING: {
+      BOTTOM_CONFIRMATION_CANDLES: 2,     // 底部确认K线数
+      TOP_CONFIRMATION_CANDLES: 1,        // 顶部确认K线数
+      REENTRY_ALLOWANCE: 0.005,           // 重新入场允许偏差
+      STOP_LOSS_TIGHTENING: 0.5           // 止损收紧系数
     }
   }
 };
 
 /**
- * 增强趋势分析器
+ * 增强趋势分析器（优化版）
  */
 class EnhancedTrendAnalyzer {
   constructor(config) {
     this.config = config;
+    this.priceCache = new Map(); // 缓存价格数据
   }
 
   /**
@@ -75,7 +116,82 @@ class EnhancedTrendAnalyzer {
   }
 
   /**
-   * 计算MACD
+   * 计算SMA（简单移动平均）
+   */
+  calculateSMA(prices) {
+    if (prices.length === 0) return null;
+    return prices.reduce((a, b) => a + b, 0) / prices.length;
+  }
+
+  /**
+   * 计算标准偏差
+   */
+  calculateStdDev(prices, mean) {
+    const squareDiffs = prices.map(price => {
+      const diff = price - mean;
+      return diff * diff;
+    });
+    const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / prices.length;
+    return Math.sqrt(avgSquareDiff);
+  }
+
+  /**
+   * 计算布林带
+   */
+  calculateBollingerBands(prices, period = 20, stdDev = 2) {
+    if (prices.length < period) return null;
+
+    const recentPrices = prices.slice(-period);
+    const middle = this.calculateSMA(recentPrices);
+    const std = this.calculateStdDev(recentPrices, middle);
+
+    return {
+      upper: middle + (std * stdDev),
+      middle: middle,
+      lower: middle - (std * stdDev),
+      bandwidth: ((std * stdDev * 2) / middle) * 100, // 带宽百分比
+      squeeze: ((std * stdDev * 2) / middle) < this.config.ENHANCED_TREND.BOLLINGER_BANDS.BAND_SQUEEZE_THRESHOLD
+    };
+  }
+
+  /**
+   * 计算KDJ指标
+   */
+  calculateKDJ(prices, highPrices, lowPrices, period = 9, slowK = 3, slowD = 3) {
+    if (prices.length < period || highPrices.length < period || lowPrices.length < period) {
+      return null;
+    }
+
+    const recentPrices = prices.slice(-period);
+    const recentHighs = highPrices.slice(-period);
+    const recentLows = lowPrices.slice(-period);
+
+    const highestHigh = Math.max(...recentHighs);
+    const lowestLow = Math.min(...recentLows);
+
+    if (highestHigh === lowestLow) return null;
+
+    const currentPrice = recentPrices[recentPrices.length - 1];
+    const rsv = ((currentPrice - lowestLow) / (highestHigh - lowestLow)) * 100;
+
+    // 简化计算K和D
+    const k = rsv; // 这里简化处理，实际需要递归计算
+    const d = k;   // 简化处理
+    const j = 3 * k - 2 * d;
+
+    return {
+      k: k,
+      d: d,
+      j: j,
+      overbought: k > 80,
+      oversold: k < 20,
+      bullishCross: k > d && (k - d) > 5, // K线上穿D线
+      bearishCross: k < d && (d - k) > 5  // K线下穿D线
+    };
+  }
+
+  /**
+   * 计算MACD（增强版）
    */
   calculateMACD(prices) {
     if (prices.length < 26) return null;
@@ -87,36 +203,95 @@ class EnhancedTrendAnalyzer {
 
     const macdLine = ema12 - ema26;
 
-    // 计算信号线（9周期EMA）
-    const signalPrices = prices.slice(-9); // 简化计算，使用最近9个价格
-    const signalLine = this.calculateEMA(signalPrices, 9);
+    // 计算信号线（9周期EMA of MACD）
+    const macdValues = [];
+    const tempPrices = [...prices];
+
+    // 简化计算：计算最近9个点的MACD值平均
+    for (let i = 0; i < 9; i++) {
+      if (tempPrices.length < 26) break;
+      const tempEma12 = this.calculateEMA(tempPrices.slice(0, 26), 12);
+      const tempEma26 = this.calculateEMA(tempPrices.slice(0, 26), 26);
+      if (tempEma12 && tempEma26) {
+        macdValues.push(tempEma12 - tempEma26);
+      }
+      tempPrices.shift();
+    }
+
+    const signalLine = macdValues.length > 0 ?
+      this.calculateSMA(macdValues) : macdLine * 0.9; // 简化处理
 
     const histogram = macdLine - signalLine;
 
     return {
       macd: macdLine,
       signal: signalLine,
-      histogram: histogram
+      histogram: histogram,
+      histogramChange: this.calculateHistogramChange(histogram, prices),
+      zeroCross: this.detectZeroCross(macdLine, signalLine),
+      bullishDivergence: this.detectBullishDivergence(prices, macdLine),
+      bearishDivergence: this.detectBearishDivergence(prices, macdLine)
     };
   }
 
   /**
-   * 计算价格变化序列
+   * 计算直方图变化
    */
-  calculatePriceChanges(prices) {
-    const changes = [];
-    for (let i = 1; i < prices.length; i++) {
-      changes.push(prices[i] - prices[i - 1]);
-    }
-    return changes;
+  calculateHistogramChange(currentHistogram, prices) {
+    if (prices.length < 2) return 0;
+
+    // 计算前一个MACD直方图值（简化）
+    const prevPrices = prices.slice(0, -1);
+    if (prevPrices.length < 26) return 0;
+
+    const prevMacd = this.calculateMACD(prevPrices);
+    if (!prevMacd) return 0;
+
+    return currentHistogram - prevMacd.histogram;
   }
 
   /**
-   * 计算SMA
+   * 检测零轴交叉
    */
-  calculateSMA(prices) {
-    if (prices.length === 0) return null;
-    return prices.reduce((a, b) => a + b, 0) / prices.length;
+  detectZeroCross(macdLine, signalLine) {
+    const threshold = this.config.ENHANCED_TREND.MCAD_TURNING_POINT.ZERO_CROSS_THRESHOLD;
+
+    return {
+      bullish: macdLine > threshold && signalLine > threshold && macdLine > signalLine,
+      bearish: macdLine < -threshold && signalLine < -threshold && macdLine < signalLine,
+      crossingUp: macdLine > 0 && signalLine < 0 && macdLine > signalLine,
+      crossingDown: macdLine < 0 && signalLine > 0 && macdLine < signalLine
+    };
+  }
+
+  /**
+   * 检测看涨背离（价格新低，MACD新高）
+   */
+  detectBullishDivergence(prices, currentMacd) {
+    const lookback = this.config.ENHANCED_TREND.MCAD_TURNING_POINT.DIVERGENCE_LOOKBACK;
+    if (prices.length < lookback * 2) return false;
+
+    const recentPrices = prices.slice(-lookback * 2);
+    const lowestPrice = Math.min(...recentPrices.slice(0, lookback));
+    const currentPrice = recentPrices[recentPrices.length - 1];
+
+    // 价格创新低但MACD没有新低
+    return currentPrice < lowestPrice && currentMacd > 0;
+  }
+
+  /**
+   * 检测看跌背离（价格新高，MACD新低）
+   */
+  detectBearishDivergence(prices, currentMacd) {
+    const lookback = this.config.ENHANCED_TREND.MCAD_TURNING_POINT.DIVERGENCE_LOOKBACK;
+    if (prices.length < lookback * 2) return false;
+
+    const recentPrices = prices.slice(-lookback * 2);
+    const highestPrice = Math.max(...recentPrices.slice(0, lookback));
+    const currentPrice = recentPrices[recentPrices.length - 1];
+
+    // 价格创新高但MACD没有新高
+    return currentPrice > highestPrice && currentMacd < 0;
   }
 
   /**
@@ -154,7 +329,166 @@ class EnhancedTrendAnalyzer {
   }
 
   /**
-   * 增强趋势分析
+   * 检测趋势转折点（核心功能）
+   */
+  detectTurningPoints(priceHistory, macdAnalysis, currentPrice) {
+    if (priceHistory.length < 10) return null;
+
+    const turningPoints = {
+      potentialBottom: false,
+      potentialTop: false,
+      bottomConfidence: 0,
+      topConfidence: 0,
+      reasons: [],
+      supportingIndicators: {}
+    };
+
+    const prices = priceHistory.map(item => item.price);
+    const recentPrices = prices.slice(-5);
+    const macd = macdAnalysis;
+
+    // 1. 检测潜在底部
+    const bottomSignals = this.detectPotentialBottom(prices, macd, currentPrice);
+    if (bottomSignals.found) {
+      turningPoints.potentialBottom = true;
+      turningPoints.bottomConfidence = bottomSignals.confidence;
+      turningPoints.reasons.push(...bottomSignals.reasons);
+      turningPoints.supportingIndicators.bottom = bottomSignals.indicators;
+    }
+
+    // 2. 检测潜在顶部
+    const topSignals = this.detectPotentialTop(prices, macd, currentPrice);
+    if (topSignals.found) {
+      turningPoints.potentialTop = true;
+      turningPoints.topConfidence = topSignals.confidence;
+      turningPoints.reasons.push(...topSignals.reasons);
+      turningPoints.supportingIndicators.top = topSignals.indicators;
+    }
+
+    return turningPoints;
+  }
+
+  /**
+   * 检测潜在底部
+   */
+  detectPotentialBottom(prices, macd, currentPrice) {
+    const result = {
+      found: false,
+      confidence: 0,
+      reasons: [],
+      indicators: {}
+    };
+
+    if (prices.length < 10 || !macd) return result;
+
+    const recentPrices = prices.slice(-5);
+    const lowestRecent = Math.min(...recentPrices);
+    const priceChange = ((currentPrice - lowestRecent) / lowestRecent) * 100;
+
+    // 底部信号条件
+    const conditions = [];
+
+    // 1. MACD看涨背离
+    if (macd.bullishDivergence) {
+      conditions.push({ name: 'MACD看涨背离', weight: 30 });
+      result.indicators.macdDivergence = true;
+    }
+
+    // 2. MACD零轴下方向上交叉
+    if (macd.zeroCross && macd.zeroCross.crossingUp) {
+      conditions.push({ name: 'MACD零轴上穿', weight: 25 });
+      result.indicators.macdCrossUp = true;
+    }
+
+    // 3. RSI超卖（需要额外传入priceChanges）
+    // 这里简化处理，实际需要计算RSI
+    if (priceChange > 2) { // 假设从低点反弹超过2%
+      conditions.push({ name: '价格反弹', weight: 20 });
+      result.indicators.priceRecovery = true;
+    }
+
+    // 4. 成交量增加（这里简化，实际需要成交量数据）
+    result.indicators.volumeIncrease = true; // 假设
+
+    // 5. MACD直方图反转
+    if (macd.histogramChange > 0 && macd.histogram < 0) {
+      conditions.push({ name: 'MACD直方图反转', weight: 15 });
+      result.indicators.histogramReversal = true;
+    }
+
+    // 计算置信度
+    if (conditions.length >= 2) {
+      result.found = true;
+      result.confidence = conditions.reduce((sum, cond) => sum + cond.weight, 0);
+      result.reasons = conditions.map(cond => cond.name);
+    }
+
+    return result;
+  }
+
+  /**
+   * 检测潜在顶部
+   */
+  detectPotentialTop(prices, macd, currentPrice) {
+    const result = {
+      found: false,
+      confidence: 0,
+      reasons: [],
+      indicators: {}
+    };
+
+    if (prices.length < 10 || !macd) return result;
+
+    const recentPrices = prices.slice(-5);
+    const highestRecent = Math.max(...recentPrices);
+    const priceChange = ((currentPrice - highestRecent) / highestRecent) * 100;
+
+    // 顶部信号条件
+    const conditions = [];
+
+    // 1. MACD看跌背离
+    if (macd.bearishDivergence) {
+      conditions.push({ name: 'MACD看跌背离', weight: 30 });
+      result.indicators.macdDivergence = true;
+    }
+
+    // 2. MACD零轴上方向下交叉
+    if (macd.zeroCross && macd.zeroCross.crossingDown) {
+      conditions.push({ name: 'MACD零轴下穿', weight: 25 });
+      result.indicators.macdCrossDown = true;
+    }
+
+    // 3. RSI超买（需要额外传入priceChanges）
+    if (priceChange < -2) { // 假设从高点回落超过2%
+      conditions.push({ name: '价格回落', weight: 20 });
+      result.indicators.priceDecline = true;
+    }
+
+    // 4. MACD直方图反转
+    if (macd.histogramChange < 0 && macd.histogram > 0) {
+      conditions.push({ name: 'MACD直方图反转', weight: 15 });
+      result.indicators.histogramReversal = true;
+    }
+
+    // 5. 布林带上轨压力
+    const bollinger = this.calculateBollingerBands(prices);
+    if (bollinger && currentPrice >= bollinger.upper) {
+      conditions.push({ name: '布林带上轨压力', weight: 10 });
+      result.indicators.bollingerUpper = true;
+    }
+
+    // 计算置信度
+    if (conditions.length >= 2) {
+      result.found = true;
+      result.confidence = conditions.reduce((sum, cond) => sum + cond.weight, 0);
+      result.reasons = conditions.map(cond => cond.name);
+    }
+
+    return result;
+  }
+
+  /**
+   * 增强趋势分析（包含转折点检测）
    */
   analyzeEnhancedTrend(trendData, currentPrice, priceChanges) {
     if (trendData.length < this.config.ENHANCED_TREND.MIN_DATA_POINTS_FOR_MACD) {
@@ -164,39 +498,36 @@ class EnhancedTrendAnalyzer {
     const prices = trendData.map(item => item.price);
 
     // 计算各种技术指标
-    const smaShort = this.calculateSMA(prices.slice(-10)); // 10周期SMA
-    const smaMedium = this.calculateSMA(prices.slice(-20)); // 20周期SMA
-    const smaLong = this.calculateSMA(prices); // 全周期SMA
-
+    const smaShort = this.calculateSMA(prices.slice(-10));
+    const smaMedium = this.calculateSMA(prices.slice(-20));
+    const smaLong = this.calculateSMA(prices);
     const emaFast = this.calculateEMA(prices, 12);
     const emaSlow = this.calculateEMA(prices, 26);
-
     const macd = this.calculateMACD(prices);
     const rsi = this.calculateRSI(priceChanges);
+    const bollinger = this.calculateBollingerBands(prices);
+
+    // 检测转折点
+    const turningPoints = this.detectTurningPoints(trendData, macd, currentPrice);
 
     const longMomentumRatio = currentPrice / smaLong;
 
     return {
       prices: prices,
       currentPrice: currentPrice,
-      sma: {
-        short: smaShort,
-        medium: smaMedium,
-        long: smaLong
-      },
-      ema: {
-        fast: emaFast,
-        slow: emaSlow
-      },
+      sma: { short: smaShort, medium: smaMedium, long: smaLong },
+      ema: { fast: emaFast, slow: emaSlow },
       macd: macd,
+      bollinger: bollinger,
       rsi: rsi,
       longMomentumRatio: longMomentumRatio,
+      turningPoints: turningPoints, // 新增转折点分析
       timestamp: new Date().getTime()
     };
   }
 
   /**
-   * 生成交易信号
+   * 生成交易信号（优化版，包含转折点信号）
    */
   generateTradingSignal(analysis) {
     if (!analysis) return null;
@@ -206,11 +537,12 @@ class EnhancedTrendAnalyzer {
       sma,
       ema,
       macd,
+      bollinger,
       rsi,
-      longMomentumRatio
+      longMomentumRatio,
+      turningPoints
     } = analysis;
 
-    // 使用配置中的阈值
     const THRESHOLDS = {
       LONG_MOMENTUM: this.config.ENHANCED_TREND.LONG_MOMENTUM_THRESHOLD,
       RSI_OVERBOUGHT: this.config.RSI_OVERBOUGHT,
@@ -226,12 +558,16 @@ class EnhancedTrendAnalyzer {
       emaBullish: ema.fast > ema.slow && currentPrice > ema.fast,
       macdBullish: macd && macd.histogram >= THRESHOLDS.MACD_HIST_WEAK,
       rsiNotOverbought: rsi < THRESHOLDS.RSI_OVERBOUGHT,
+      macdZeroCrossUp: macd && macd.zeroCross && macd.zeroCross.crossingUp,
+      potentialBottom: turningPoints && turningPoints.potentialBottom,
 
       // 空头条件
       shortMomentum: longMomentumRatio < (1 - THRESHOLDS.LONG_MOMENTUM),
       emaBearish: ema.fast < ema.slow && currentPrice < ema.fast,
       macdBearish: macd && macd.histogram <= THRESHOLDS.MACD_HIST_WEAK,
       rsiNotOversold: rsi > THRESHOLDS.RSI_OVERSOLD,
+      macdZeroCrossDown: macd && macd.zeroCross && macd.zeroCross.crossingDown,
+      potentialTop: turningPoints && turningPoints.potentialTop,
 
       // 强度条件
       strongBullishMACD: macd && macd.histogram >= THRESHOLDS.MACD_HIST_STRONG,
@@ -244,70 +580,83 @@ class EnhancedTrendAnalyzer {
     let signal = 'HOLD';
     let confidence = 'LOW';
     let reason = [];
+    let signalType = 'REGULAR'; // REGULAR 或 TURNING_POINT
 
-    // 检查强烈多头信号
-    const strongBullishConditions = [
-      conditions.longMomentum,
-      conditions.emaBullish,
-      conditions.macdBullish,
-      conditions.rsiNotOverbought
-    ].filter(Boolean).length;
-
-    const veryStrongBullish = strongBullishConditions >= 3 &&
-      (conditions.strongBullishMACD || conditions.veryBullishMomentum);
-
-    // 检查强烈空头信号
-    const strongBearishConditions = [
-      conditions.shortMomentum,
-      conditions.emaBearish,
-      conditions.macdBearish,
-      conditions.rsiNotOversold
-    ].filter(Boolean).length;
-
-    const veryStrongBearish = strongBearishConditions >= 3 &&
-      (conditions.strongBearishMACD || conditions.veryBearishMomentum);
-
-    // 生成信号
-    if (veryStrongBullish) {
+    // 检查转折点信号（优先）
+    if (conditions.potentialBottom && turningPoints.bottomConfidence > 50) {
       signal = 'BUY';
-      confidence = 'CONVICTION';
-      reason = ['强烈多头动量', 'EMA多头排列', 'MACD看涨', 'RSI健康'];
-    } else if (strongBullishConditions >= 3) {
-      signal = 'BUY';
-      confidence = 'HIGH';
-      reason = ['多头动量明显', 'EMA支持上涨', 'MACD转强'];
-    } else if (strongBullishConditions >= 2) {
-      signal = 'BUY';
-      confidence = 'MEDIUM';
-      reason = ['多头信号初现', '技术指标偏多'];
-    } else if (veryStrongBearish) {
+      confidence = turningPoints.bottomConfidence > 70 ? '极度确信' : '高';
+      reason = [`底部转折点检测 (置信度: ${turningPoints.bottomConfidence})`, ...turningPoints.reasons];
+      signalType = 'TURNING_POINT';
+
+    } else if (conditions.potentialTop && turningPoints.topConfidence > 50) {
       signal = 'SELL';
-      confidence = 'CONVICTION';
-      reason = ['强烈空头动量', 'EMA空头排列', 'MACD看跌', 'RSI健康'];
-    } else if (strongBearishConditions >= 3) {
-      signal = 'SELL';
-      confidence = 'HIGH';
-      reason = ['空头动量明显', 'EMA支持下跌', 'MACD转弱'];
-    } else if (strongBearishConditions >= 2) {
-      signal = 'SELL';
-      confidence = 'MEDIUM';
-      reason = ['空头信号初现', '技术指标偏空'];
+      confidence = turningPoints.topConfidence > 70 ? '极度确信' : '高';
+      reason = [`顶部转折点检测 (置信度: ${turningPoints.topConfidence})`, ...turningPoints.reasons];
+      signalType = 'TURNING_POINT';
+
     } else {
-      // 中性市场条件
-      const isNeutralMarket =
-        Math.abs(longMomentumRatio - 1) < THRESHOLDS.LONG_MOMENTUM * 0.5 &&
-        Math.abs(ema.fast - ema.slow) / currentPrice < 0.01 &&
-        macd && Math.abs(macd.histogram) < THRESHOLDS.MACD_HIST_STRONG * 0.5 &&
-        rsi > 40 && rsi < 60;
+      // 常规信号逻辑（原逻辑）
+      const strongBullishConditions = [
+        conditions.longMomentum,
+        conditions.emaBullish,
+        conditions.macdBullish,
+        conditions.rsiNotOverbought
+      ].filter(Boolean).length;
 
-      if (isNeutralMarket) {
-        signal = 'HOLD';
+      const veryStrongBullish = strongBullishConditions >= 3 &&
+        (conditions.strongBullishMACD || conditions.veryBullishMomentum);
+
+      const strongBearishConditions = [
+        conditions.shortMomentum,
+        conditions.emaBearish,
+        conditions.macdBearish,
+        conditions.rsiNotOversold
+      ].filter(Boolean).length;
+
+      const veryStrongBearish = strongBearishConditions >= 3 &&
+        (conditions.strongBearishMACD || conditions.veryBearishMomentum);
+
+      if (veryStrongBullish) {
+        signal = 'BUY';
+        confidence = '极度确信';
+        reason = ['强烈多头动量', 'EMA多头排列', 'MACD看涨', 'RSI健康'];
+      } else if (strongBullishConditions >= 3) {
+        signal = 'BUY';
+        confidence = '高';
+        reason = ['多头动量明显', 'EMA支持上涨', 'MACD转强'];
+      } else if (strongBullishConditions >= 2) {
+        signal = 'BUY';
         confidence = 'MEDIUM';
-        reason = ['市场震荡', '无明显趋势', '等待突破'];
+        reason = ['多头信号初现', '技术指标偏多'];
+      } else if (veryStrongBearish) {
+        signal = 'SELL';
+        confidence = '极度确信';
+        reason = ['强烈空头动量', 'EMA空头排列', 'MACD看跌', 'RSI健康'];
+      } else if (strongBearishConditions >= 3) {
+        signal = 'SELL';
+        confidence = '高';
+        reason = ['空头动量明显', 'EMA支持下跌', 'MACD转弱'];
+      } else if (strongBearishConditions >= 2) {
+        signal = 'SELL';
+        confidence = 'MEDIUM';
+        reason = ['空头信号初现', '技术指标偏空'];
       } else {
-        signal = 'HOLD';
-        confidence = 'LOW';
-        reason = ['信号矛盾', '需要更多确认'];
+        const isNeutralMarket =
+          Math.abs(longMomentumRatio - 1) < THRESHOLDS.LONG_MOMENTUM * 0.5 &&
+          Math.abs(ema.fast - ema.slow) / currentPrice < 0.01 &&
+          macd && Math.abs(macd.histogram) < THRESHOLDS.MACD_HIST_STRONG * 0.5 &&
+          rsi > 40 && rsi < 60;
+
+        if (isNeutralMarket) {
+          signal = 'HOLD';
+          confidence = 'MEDIUM';
+          reason = ['市场震荡', '无明显趋势', '等待突破'];
+        } else {
+          signal = 'HOLD';
+          confidence = 'LOW';
+          reason = ['信号矛盾', '需要更多确认'];
+        }
       }
     }
 
@@ -315,21 +664,160 @@ class EnhancedTrendAnalyzer {
       signal,
       confidence,
       reason,
+      signalType, // 新增：信号类型
       conditions: {
         longMomentum: conditions.longMomentum,
         emaBullish: conditions.emaBullish,
         macdBullish: conditions.macdBullish,
         shortMomentum: conditions.shortMomentum,
         emaBearish: conditions.emaBearish,
-        macdBearish: conditions.macdBearish
+        macdBearish: conditions.macdBearish,
+        potentialBottom: conditions.potentialBottom,
+        potentialTop: conditions.potentialTop
       },
       technicals: {
         longMomentumRatio: (longMomentumRatio - 1) * 100,
         emaSpread: ema.fast - ema.slow,
         macdHistogram: macd ? macd.histogram : null,
-        rsi: rsi
+        macdLine: macd ? macd.macd : null,
+        signalLine: macd ? macd.signal : null,
+        rsi: rsi,
+        bollingerBandwidth: bollinger ? bollinger.bandwidth : null,
+        turningPoints: turningPoints
       }
     };
+  }
+}
+
+/**
+ * 交易管理器
+ */
+class TradingManager {
+  constructor(config) {
+    this.config = config.TRADING || {
+      DEFAULT_POSITION_SIZE: 100,
+      DEFAULT_LEVERAGE: 1,
+      TAKE_PROFIT_RATIO: 0.02,
+      STOP_LOSS_RATIO: 0.01,
+      MAX_TRADES_PER_COIN: 3,
+      MIN_SIGNAL_INTERVAL: 180000
+    };
+
+    this.tradeCounter = 0;
+  }
+
+  /**
+   * 创建交易ID
+   */
+  generateTradeId() {
+    return `TRADE_${Date.now()}_${++this.tradeCounter}`;
+  }
+
+  /**
+   * 开仓交易
+   */
+  openTrade(symbol, name, signal, entryPrice, confidence) {
+    const tradeId = this.generateTradeId();
+    const positionSize = this.config.DEFAULT_POSITION_SIZE;
+    const leverage = this.config.DEFAULT_LEVERAGE;
+
+    // 根据信号类型设置止盈止损
+    const isLong = signal === 'BUY';
+    const takeProfitPrice = isLong
+      ? entryPrice * (1 + this.config.TAKE_PROFIT_RATIO)
+      : entryPrice * (1 - this.config.TAKE_PROFIT_RATIO);
+
+    const stopLossPrice = isLong
+      ? entryPrice * (1 - this.config.STOP_LOSS_RATIO)
+      : entryPrice * (1 + this.config.STOP_LOSS_RATIO);
+
+    const trade = {
+      id: tradeId,
+      symbol: symbol,
+      name: name,
+      type: isLong ? 'LONG' : 'SHORT',
+      entryPrice: entryPrice,
+      positionSize: positionSize,
+      leverage: leverage,
+      takeProfitPrice: takeProfitPrice,
+      stopLossPrice: stopLossPrice,
+      entryTime: new Date().getTime(),
+      entryTimeString: new Date().toLocaleString(),
+      status: 'OPEN',
+      currentPrice: entryPrice,
+      currentProfit: 0,
+      profitPercentage: 0,
+      maxProfit: 0,
+      maxLoss: 0,
+      signalConfidence: confidence,
+      exitPrice: null,
+      exitTime: null,
+      exitReason: null,
+      exitProfit: 0
+    };
+
+    return trade;
+  }
+
+  /**
+   * 更新交易状态
+   */
+  updateTrade(trade, currentPrice) {
+    trade.currentPrice = currentPrice;
+
+    // 计算盈亏
+    if (trade.type === 'LONG') {
+      trade.currentProfit = (currentPrice - trade.entryPrice) / trade.entryPrice * trade.positionSize * trade.leverage;
+    } else {
+      trade.currentProfit = (trade.entryPrice - currentPrice) / trade.entryPrice * trade.positionSize * trade.leverage;
+    }
+
+    trade.profitPercentage = trade.currentProfit / trade.positionSize * 100;
+
+    // 更新最大盈利/亏损
+    if (trade.currentProfit > trade.maxProfit) {
+      trade.maxProfit = trade.currentProfit;
+    }
+    if (trade.currentProfit < trade.maxLoss) {
+      trade.maxLoss = trade.currentProfit;
+    }
+
+    // 检查止盈止损
+    if (trade.type === 'LONG') {
+      if (currentPrice >= trade.takeProfitPrice) {
+        return { shouldClose: true, reason: 'TAKE_PROFIT', exitPrice: trade.takeProfitPrice };
+      } else if (currentPrice <= trade.stopLossPrice) {
+        return { shouldClose: true, reason: 'STOP_LOSS', exitPrice: trade.stopLossPrice };
+      }
+    } else {
+      if (currentPrice <= trade.takeProfitPrice) {
+        return { shouldClose: true, reason: 'TAKE_PROFIT', exitPrice: trade.takeProfitPrice };
+      } else if (currentPrice >= trade.stopLossPrice) {
+        return { shouldClose: true, reason: 'STOP_LOSS', exitPrice: trade.stopLossPrice };
+      }
+    }
+
+    return { shouldClose: false };
+  }
+
+  /**
+   * 平仓交易
+   */
+  closeTrade(trade, exitPrice, reason) {
+    trade.status = 'CLOSED';
+    trade.exitPrice = exitPrice;
+    trade.exitTime = new Date().getTime();
+    trade.exitTimeString = new Date().toLocaleString();
+    trade.exitReason = reason;
+
+    // 计算最终盈亏
+    if (trade.type === 'LONG') {
+      trade.exitProfit = (exitPrice - trade.entryPrice) / trade.entryPrice * trade.positionSize * trade.leverage;
+    } else {
+      trade.exitProfit = (trade.entryPrice - exitPrice) / trade.entryPrice * trade.positionSize * trade.leverage;
+    }
+
+    return trade;
   }
 }
 
@@ -357,6 +845,20 @@ class MultiCryptoPriceMonitor {
     // 初始化增强趋势分析器
     this.trendAnalyzer = new EnhancedTrendAnalyzer(this.config.TREND_ANALYSIS);
 
+    // 初始化交易管理器
+    this.tradingManager = new TradingManager(this.config);
+
+    // 交易统计
+    this.globalTradeStats = {
+      totalTrades: 0,
+      winningTrades: 0,
+      losingTrades: 0,
+      totalProfit: 0,
+      winRate: 0,
+      activeTrades: 0,
+      maxConcurrentTrades: 0
+    };
+
     // 初始化币种数据
     this.initializeCoinData();
 
@@ -376,6 +878,10 @@ class MultiCryptoPriceMonitor {
     console.log(`趋势分析窗口: ${this.config.TREND_ANALYSIS.TIME_WINDOW}分钟`);
     console.log(`RSI周期: ${this.config.TREND_ANALYSIS.RSI_PERIOD}，超买: ${this.config.TREND_ANALYSIS.RSI_OVERBOUGHT}，超卖: ${this.config.TREND_ANALYSIS.RSI_OVERSOLD}`);
     console.log(`增强趋势分析: MACD + EMA + 动量分析`);
+    console.log(`模拟交易: ${this.config.TRADING.DEFAULT_POSITION_SIZE}U仓位，止盈${this.config.TRADING.TAKE_PROFIT_RATIO * 100}%/止损${this.config.TRADING.STOP_LOSS_RATIO * 100}%`);
+
+    // 启动交易统计报告
+    this.startTradeReporting();
   }
 
   /**
@@ -492,9 +998,13 @@ class MultiCryptoPriceMonitor {
     this.config.MAX_FAILED_ATTEMPTS = newConfig.MAX_FAILED_ATTEMPTS;
     this.config.TIME_CONTROL = newConfig.TIME_CONTROL;
     this.config.TREND_ANALYSIS = newConfig.TREND_ANALYSIS;
+    this.config.TRADING = newConfig.TRADING;
 
     // 更新趋势分析器配置
     this.trendAnalyzer = new EnhancedTrendAnalyzer(this.config.TREND_ANALYSIS);
+
+    // 更新交易管理器配置
+    this.tradingManager = new TradingManager(this.config);
 
     // 处理币种列表变化
     if (JSON.stringify(this.config.COINS) !== JSON.stringify(newConfig.COINS)) {
@@ -523,9 +1033,58 @@ class MultiCryptoPriceMonitor {
 📊 监控币种: ${newConfig.COINS.length}个
 ⏰ 时间间隔: ${newConfig.TIME_CONTROL.INTERVAL / 1000}秒
 📈 趋势窗口: ${newConfig.TREND_ANALYSIS.TIME_WINDOW}分钟
-🔔 价格阈值: ${(newConfig.PRICE_CHANGE_THRESHOLD * 100).toFixed(1)}%`;
+💰 模拟交易: ${newConfig.TRADING.DEFAULT_POSITION_SIZE}U仓位
+🎯 止盈止损: ${newConfig.TRADING.TAKE_PROFIT_RATIO * 100}%/${newConfig.TRADING.STOP_LOSS_RATIO * 100}%`;
 
     await this.sendPushNotification(title, message);
+  }
+
+  /**
+  * 发送转折点检测提醒
+  */
+  async sendTurningPointAlert(analysis, tradingSignal) {
+    const { symbol, name, currentPrice } = analysis;
+    const { signal, confidence, reason, signalType, technicals } = tradingSignal;
+
+    if (signalType !== 'TURNING_POINT') return;
+
+    const turningPoints = technicals.turningPoints;
+    if (!turningPoints) return;
+
+    let title = '';
+    let emoji = '';
+
+    if (signal === 'BUY') {
+      emoji = '🟢';
+      title = `${emoji} ${name}底部转折点检测 (${currentPrice})`;
+    } else {
+      emoji = '🔴';
+      title = `${emoji} ${name}顶部转折点检测 (${currentPrice})`;
+    }
+
+    const message = `[${this.getCurrentTimeString()}]
+${name}${signal === 'BUY' ? '底部' : '顶部'}转折点检测!
+
+📊 检测结果:
+🎯 信号类型: ${signal} (${confidence})
+📈 置信度: ${signal === 'BUY' ? turningPoints.bottomConfidence : turningPoints.topConfidence}%
+
+💡 检测理由:
+${reason.map(r => `• ${r}`).join('\n')}
+
+📊 技术指标详情:
+💰 当前价格: ${currentPrice} USDT
+📟 MACD直方图: ${technicals.macdHistogram ? technicals.macdHistogram.toFixed(6) : 'N/A'}
+📈 MACD线: ${technicals.macdLine ? technicals.macdLine.toFixed(6) : 'N/A'}
+🎯 RSI: ${technicals.rsi ? technicals.rsi.toFixed(2) : 'N/A'}
+📊 布林带宽: ${technicals.bollingerBandwidth ? technicals.bollingerBandwidth.toFixed(2) + '%' : 'N/A'}
+
+⚡ 交易建议:
+💡 转折点信号建议使用更紧止损
+🎯 等待${signal === 'BUY' ? this.config.TRADING.TURNING_POINT_TRADING.BOTTOM_CONFIRMATION_CANDLES : this.config.TRADING.TURNING_POINT_TRADING.TOP_CONFIRMATION_CANDLES}根K线确认`;
+
+    await this.sendPushNotification(title, message);
+    console.log(`[${this.getCurrentTimeString()}] 🔄 ${name}${signal === 'BUY' ? '底部' : '顶部'}转折点检测完成`);
   }
 
   /**
@@ -551,9 +1110,80 @@ class MultiCryptoPriceMonitor {
         previousTrendState: 'neutral',
         currentTradingSignal: null,
         previousTradingSignal: null,
-        fetchCount: 0
+        fetchCount: 0,
+
+        // 新增交易相关字段
+        activeTrades: [],         // 活跃交易
+        tradeHistory: [],         // 历史交易记录
+        tradeStats: {             // 交易统计
+          totalTrades: 0,
+          winningTrades: 0,
+          losingTrades: 0,
+          totalProfit: 0,
+          winRate: 0,
+          maxDrawdown: 0,
+          currentDrawdown: 0
+        },
+        lastTradeTime: null       // 上次交易时间
       });
     });
+
+    // 加载交易历史
+    this.loadTradeHistory();
+  }
+
+  /**
+   * 加载交易历史
+   */
+  async loadTradeHistory() {
+    try {
+      const data = await fs.readFile(this.config.TRADING.TRADE_LOG_FILE, 'utf8');
+      const tradeHistory = JSON.parse(data);
+
+      // 更新全局统计
+      for (const trade of tradeHistory) {
+        this.globalTradeStats.totalTrades++;
+        if (trade.exitProfit > 0) {
+          this.globalTradeStats.winningTrades++;
+        } else {
+          this.globalTradeStats.losingTrades++;
+        }
+        this.globalTradeStats.totalProfit += trade.exitProfit;
+      }
+
+      this.globalTradeStats.winRate = this.globalTradeStats.totalTrades > 0
+        ? (this.globalTradeStats.winningTrades / this.globalTradeStats.totalTrades * 100).toFixed(2)
+        : 0;
+
+      console.log(`[${this.getCurrentTimeString()}] 📊 加载交易历史: ${tradeHistory.length}笔，胜率${this.globalTradeStats.winRate}%`);
+
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        console.error(`[${this.getCurrentTimeString()}] ❌ 加载交易历史失败:`, error.message);
+      }
+    }
+  }
+
+  /**
+   * 保存交易历史
+   */
+  async saveTradeHistory() {
+    try {
+      const allTrades = [];
+      for (const coin of this.config.COINS) {
+        const coinInfo = this.coinData.get(coin.symbol);
+        allTrades.push(...coinInfo.tradeHistory);
+      }
+
+      await fs.writeFile(
+        this.config.TRADING.TRADE_LOG_FILE,
+        JSON.stringify(allTrades, null, 2)
+      );
+
+      console.log(`[${this.getCurrentTimeString()}] 💾 保存交易历史: ${allTrades.length}笔`);
+    } catch (error) {
+      console.error(`[${this.getCurrentTimeString()}] ❌ 保存交易历史失败:`, error.message);
+    }
   }
 
   /**
@@ -647,7 +1277,7 @@ class MultiCryptoPriceMonitor {
     // 添加随机延迟，避免并发请求
     const randomDelay = Math.floor(Math.random() * 2000); // 0-2秒随机延迟
     await new Promise(resolve => setTimeout(resolve, randomDelay));
-    
+
     const coinInfo = this.coinData.get(symbol);
 
     try {
@@ -738,20 +1368,43 @@ class MultiCryptoPriceMonitor {
   }
 
   /**
-   * 清理趋势分析数据，只保留指定时间窗口内的数据
+   * 智能清理趋势分析数据
    */
   cleanupTrendData(symbol) {
     const coinInfo = this.coinData.get(symbol);
     const timeWindowMs = this.config.TREND_ANALYSIS.TIME_WINDOW * 60 * 1000;
-    const cutoffTime = new Date().getTime() - timeWindowMs;
+    const minDataPoints = this.config.TREND_ANALYSIS.ENHANCED_TREND?.MIN_DATA_POINTS_FOR_MACD ?? 20;
+
+    // 使用重叠窗口：保留比分析窗口更长的数据
+    const overlapFactor = 1.5; // 保留1.5倍时间窗口的数据
+    const cleanupWindowMs = timeWindowMs * overlapFactor;
+    const cutoffTime = new Date().getTime() - cleanupWindowMs;
 
     const beforeCount = coinInfo.trendData.length;
+
+    // 温和清理：只清理远期的旧数据，保留足够缓冲
     coinInfo.trendData = coinInfo.trendData.filter(record =>
       record.timestamp > cutoffTime
     );
 
+    // 只有在数据量非常大时才进行数量限制
+    const comfortableDataPoints = minDataPoints * 4; // 宽松的数据量上限
+    if (coinInfo.trendData.length > comfortableDataPoints) {
+      // 保留更多的数据点，确保分析连续性
+      const retainPoints = minDataPoints * 3;
+      coinInfo.trendData = coinInfo.trendData.slice(-retainPoints);
+    }
+
     if (beforeCount !== coinInfo.trendData.length) {
-      console.log(`[${this.getCurrentTimeString()}] 清理${this.coinData.get(symbol).name}趋势数据: ${beforeCount} -> ${coinInfo.trendData.length}`);
+      console.log(`[${this.getCurrentTimeString()}] 温和清理${coinInfo.name}: ${beforeCount} -> ${coinInfo.trendData.length} (保留${overlapFactor}倍窗口)`);
+    }
+
+    // 记录数据状态
+    const currentDataPoints = coinInfo.trendData.length;
+    if (currentDataPoints < minDataPoints) {
+      console.log(`[${this.getCurrentTimeString()}] 📊 ${coinInfo.name}数据积累中: ${currentDataPoints}/${minDataPoints}`);
+    } else if (currentDataPoints >= minDataPoints) {
+      console.log(`[${this.getCurrentTimeString()}] ✅ ${coinInfo.name}数据充足: ${currentDataPoints}个数据点`);
     }
   }
 
@@ -895,8 +1548,9 @@ class MultiCryptoPriceMonitor {
 
     const tradingSignal = this.trendAnalyzer.generateTradingSignal(enhancedAnalysis);
 
-    // 只在信号明确时发送提醒（避免过多的HOLD信号）
-    if (tradingSignal.signal !== 'HOLD' && tradingSignal.confidence === 'HIGH') {
+    // 只在HIGH或CONVICTION信号时开仓
+    if (tradingSignal.signal !== 'HOLD' &&
+      (tradingSignal.confidence === '高' || tradingSignal.confidence === '极度确信')) {
       await this.sendTradingSignalAlert(analysis, enhancedAnalysis, tradingSignal);
       coinInfo.lastTrendAlert = now;
       coinInfo.lastTradingSignalAlert = now;
@@ -916,18 +1570,22 @@ class MultiCryptoPriceMonitor {
     let title = '';
     let emoji = '';
 
+    // 只有在HIGH或CONVICTION时开仓
+    const shouldTrade = (signal === 'BUY' || signal === 'SELL') &&
+      (confidence === '高' || confidence === '极度确信' || signalType === 'TURNING_POINT');
+
     switch (signal) {
       case 'BUY':
-        emoji = confidence === 'CONVICTION' ? '🚀' : '📈';
-        title = `${emoji} ${analysis.name}买入信号 (${confidence})`;
+        emoji = confidence === '极度确信' ? '🚀' : '📈';
+        title = `${emoji} ${analysis.name}买入信号 (${analysis.currentPrice})`;
         break;
       case 'SELL':
-        emoji = confidence === 'CONVICTION' ? '🔻' : '📉';
-        title = `${emoji} ${analysis.name}卖出信号 (${confidence})`;
+        emoji = confidence === '极度确信' ? '🔻' : '📉';
+        title = `${emoji} ${analysis.name}卖出信号 (${analysis.currentPrice})`;
         break;
       case 'HOLD':
         emoji = '⏸️';
-        title = `${emoji} ${analysis.name}观望 (${confidence})`;
+        title = `${emoji} ${analysis.name}观望 (${analysis.currentPrice})`;
         break;
     }
 
@@ -949,8 +1607,141 @@ ${reason.map(r => `• ${r}`).join('\n')}
 🎯 趋势强度: ${(analysis.strength * 100).toFixed(2)}%
 🌊 波动性: ${analysis.volatility.toFixed(2)}%`;
 
-    await this.sendPushNotification(title, message);
+    // 如果需要交易，执行模拟开仓
+    if (shouldTrade) {
+      const coinInfo = this.coinData.get(analysis.symbol);
+      const now = Date.now();
+
+      // 检查交易间隔
+      const canTrade = !coinInfo.lastTradeTime ||
+        (now - coinInfo.lastTradeTime > this.config.TRADING.MIN_SIGNAL_INTERVAL);
+
+      // 检查活跃交易数量
+      const activeTradesCount = coinInfo.activeTrades.length;
+      const hasActiveTrades = activeTradesCount > 0;
+
+      if (canTrade && !hasActiveTrades) {
+        // 执行模拟开仓
+        const trade = this.tradingManager.openTrade(
+          analysis.symbol,
+          analysis.name,
+          signal,
+          analysis.currentPrice,
+          confidence
+        );
+
+        coinInfo.activeTrades.push(trade);
+        coinInfo.lastTradeTime = now;
+        this.globalTradeStats.activeTrades++;
+
+        // 更新最大并发交易数
+        if (this.globalTradeStats.activeTrades > this.globalTradeStats.maxConcurrentTrades) {
+          this.globalTradeStats.maxConcurrentTrades = this.globalTradeStats.activeTrades;
+        }
+
+        // 添加交易信息到推送
+        const tradeMessage = `
+
+💰 模拟交易开仓:
+🔄 方向: ${trade.type}
+💰 仓位: ${trade.positionSize} USDT
+🎯 入场价格: ${trade.entryPrice.toFixed(6)}
+✅ 止盈价格: ${trade.takeProfitPrice.toFixed(6)} (${(this.config.TRADING.TAKE_PROFIT_RATIO * 100).toFixed(1)}%)
+❌ 止损价格: ${trade.stopLossPrice.toFixed(6)} (${(this.config.TRADING.STOP_LOSS_RATIO * 100).toFixed(1)}%)`;
+
+        await this.sendPushNotification(title, message + tradeMessage);
+        console.log(`[${this.getCurrentTimeString()}] 💰 模拟开仓: ${analysis.name} ${trade.type} @ ${trade.entryPrice.toFixed(6)}`);
+      } else {
+        if (hasActiveTrades) {
+          console.log(`[${this.getCurrentTimeString()}] ⏰ ${analysis.name}已有${activeTradesCount}个活跃交易，跳过开仓`);
+        }
+        await this.sendPushNotification(title, message);
+      }
+    } else {
+      await this.sendPushNotification(title, message);
+    }
+
     console.log(`[${this.getCurrentTimeString()}] ✅ 已发送${analysis.name}交易信号: ${signal} (${confidence})`);
+  }
+
+  /**
+   * 监控和更新活跃交易
+   */
+  async monitorTrades(symbol, name, currentPrice) {
+    const coinInfo = this.coinData.get(symbol);
+
+    if (coinInfo.activeTrades.length === 0) return;
+
+    // 更新每个活跃交易
+    for (let i = coinInfo.activeTrades.length - 1; i >= 0; i--) {
+      const trade = coinInfo.activeTrades[i];
+      const updateResult = this.tradingManager.updateTrade(trade, currentPrice);
+
+      // 检查是否需要平仓
+      if (updateResult.shouldClose) {
+        // 执行平仓
+        const closedTrade = this.tradingManager.closeTrade(
+          trade,
+          updateResult.exitPrice,
+          updateResult.reason
+        );
+
+        // 从活跃交易移除
+        coinInfo.activeTrades.splice(i, 1);
+
+        // 添加到历史记录
+        coinInfo.tradeHistory.push(closedTrade);
+
+        // 更新统计
+        coinInfo.tradeStats.totalTrades++;
+        this.globalTradeStats.totalTrades++;
+
+        if (closedTrade.exitProfit > 0) {
+          coinInfo.tradeStats.winningTrades++;
+          this.globalTradeStats.winningTrades++;
+        } else {
+          coinInfo.tradeStats.losingTrades++;
+          this.globalTradeStats.losingTrades++;
+        }
+
+        coinInfo.tradeStats.totalProfit += closedTrade.exitProfit;
+        this.globalTradeStats.totalProfit += closedTrade.exitProfit;
+
+        // 更新胜率
+        coinInfo.tradeStats.winRate = coinInfo.tradeStats.totalTrades > 0
+          ? (coinInfo.tradeStats.winningTrades / coinInfo.tradeStats.totalTrades * 100).toFixed(2)
+          : 0;
+
+        this.globalTradeStats.winRate = this.globalTradeStats.totalTrades > 0
+          ? (this.globalTradeStats.winningTrades / this.globalTradeStats.totalTrades * 100).toFixed(2)
+          : 0;
+
+        // 发送平仓通知
+        const profitColor = closedTrade.exitProfit > 0 ? '🟢' : '🔴';
+        const profitText = closedTrade.exitProfit > 0 ? '盈利' : '亏损';
+        const profitPercent = (closedTrade.exitProfit / trade.positionSize * 100).toFixed(2);
+
+        const closeMessage = `${profitColor} ${name}交易平仓通知
+🔄 方向: ${trade.type}
+💰 仓位: ${trade.positionSize} USDT
+🎯 入场价格: ${trade.entryPrice.toFixed(6)}
+🏁 离场价格: ${updateResult.exitPrice.toFixed(6)}
+⏰ 持仓时间: ${Math.round((closedTrade.exitTime - closedTrade.entryTime) / 60000)}分钟
+💸 盈亏: ${closedTrade.exitProfit.toFixed(2)} USDT (${profitPercent}%)
+📊 平仓原因: ${updateResult.reason === 'TAKE_PROFIT' ? '止盈' : '止损'}
+
+📈 当前胜率: ${coinInfo.tradeStats.winRate}%
+💰 累计盈亏: ${coinInfo.tradeStats.totalProfit.toFixed(2)} USDT`;
+
+        await this.sendPushNotification(`💰 ${name}交易${profitText}`, closeMessage);
+        console.log(`[${this.getCurrentTimeString()}] 💰 ${name}交易平仓: ${profitText} ${closedTrade.exitProfit.toFixed(2)}USDT (${profitPercent}%)`);
+
+        this.globalTradeStats.activeTrades--;
+
+        // 保存交易历史
+        await this.saveTradeHistory();
+      }
+    }
   }
 
   /**
@@ -1018,7 +1809,7 @@ ${reason.map(r => `• ${r}`).join('\n')}
     let message = '';
 
     if (analysis.rsi >= this.config.TREND_ANALYSIS.RSI_OVERBOUGHT) {
-      title = `🚨 ${analysis.name}超买警告`;
+      title = `🚨 ${analysis.name}超买警告 (${coinInfo.currentPrice})`;
       message = `[${this.getCurrentTimeString()}]
 ${analysis.name}RSI进入超买区域!
 📊 RSI: ${analysis.rsi.toFixed(2)} (超过${this.config.TREND_ANALYSIS.RSI_OVERBOUGHT})
@@ -1030,7 +1821,7 @@ ${analysis.name}RSI进入超买区域!
       console.log(`[${this.getCurrentTimeString()}] ✅ 已发送${analysis.name}超买警告`);
 
     } else if (analysis.rsi <= this.config.TREND_ANALYSIS.RSI_OVERSOLD) {
-      title = `🛒 ${analysis.name}超卖机会`;
+      title = `🛒 ${analysis.name}超卖机会 (${coinInfo.currentPrice})`;
       message = `[${this.getCurrentTimeString()}]
 ${analysis.name}RSI进入超卖区域!
 📊 RSI: ${analysis.rsi.toFixed(2)} (低于${this.config.TREND_ANALYSIS.RSI_OVERSOLD})
@@ -1064,6 +1855,9 @@ ${analysis.name}RSI进入超卖区域!
     const price = await this.fetchPriceWithTimeControl(symbol, name);
     if (price === null) return;
 
+    // 监控和更新活跃交易
+    await this.monitorTrades(symbol, name, price);
+
     if (coinInfo.lastPrice && coinInfo.currentPrice) {
       const priceChange = coinInfo.currentPrice - coinInfo.lastPrice;
       const priceChangePercent = Math.abs(priceChange / coinInfo.lastPrice);
@@ -1082,7 +1876,7 @@ ${name}价格${direction}${(priceChangePercent * 100).toFixed(2)}%
 上次价格: ${coinInfo.lastPrice} USDT`;
 
           await this.sendPushNotification(
-            `${name}价格${direction}波动提醒`,
+            `${name}价格${direction}波动提醒（${coinInfo.currentPrice}）`,
             message
           );
 
@@ -1220,6 +2014,61 @@ ${name}价格${direction}${(priceChangePercent * 100).toFixed(2)}%
   }
 
   /**
+   * 生成交易统计报告
+   */
+  generateTradeReport() {
+    const report = {
+      timestamp: new Date().toLocaleString(),
+      globalStats: { ...this.globalTradeStats },
+      coinStats: {}
+    };
+
+    for (const coin of this.config.COINS) {
+      const coinInfo = this.coinData.get(coin.symbol);
+      report.coinStats[coin.name] = {
+        totalTrades: coinInfo.tradeStats.totalTrades,
+        winningTrades: coinInfo.tradeStats.winningTrades,
+        losingTrades: coinInfo.tradeStats.losingTrades,
+        winRate: coinInfo.tradeStats.winRate,
+        totalProfit: coinInfo.tradeStats.totalProfit.toFixed(2),
+        activeTrades: coinInfo.activeTrades.length,
+        currentSignals: coinInfo.currentTradingSignal ?
+          `${coinInfo.currentTradingSignal.signal} (${coinInfo.currentTradingSignal.confidence})` : '无信号'
+      };
+    }
+
+    return report;
+  }
+
+  /**
+   * 定期打印交易统计
+   */
+  startTradeReporting() {
+    setInterval(() => {
+      const report = this.generateTradeReport();
+
+      console.log('\n=== 交易统计报告 ===');
+      console.log(`📊 全局统计:`);
+      console.log(`   总交易数: ${report.globalStats.totalTrades}`);
+      console.log(`   盈利交易: ${report.globalStats.winningTrades}`);
+      console.log(`   亏损交易: ${report.globalStats.losingTrades}`);
+      console.log(`   胜率: ${report.globalStats.winRate}%`);
+      console.log(`   总盈亏: ${report.globalStats.totalProfit.toFixed(2)} USDT`);
+      console.log(`   活跃交易: ${report.globalStats.activeTrades}`);
+      console.log(`   最大并发: ${report.globalStats.maxConcurrentTrades}`);
+
+      console.log(`\n📈 各币种统计:`);
+      for (const [coinName, stats] of Object.entries(report.coinStats)) {
+        if (stats.totalTrades > 0) {
+          console.log(`   ${coinName}: ${stats.totalTrades}次, 胜率${stats.winRate}%, 盈利${stats.totalProfit}U`);
+        }
+      }
+      console.log('===================\n');
+
+    }, 5 * 60 * 1000); // 每5分钟报告一次
+  }
+
+  /**
    * 开始监控所有币种价格
    */
   async startMonitoring() {
@@ -1236,6 +2085,7 @@ ${name}价格${direction}${(priceChangePercent * 100).toFixed(2)}%
 📊 趋势窗口: ${this.config.TREND_ANALYSIS.TIME_WINDOW}分钟
 📈 RSI监控: ${this.config.TREND_ANALYSIS.RSI_PERIOD}周期 (超买${this.config.TREND_ANALYSIS.RSI_OVERBOUGHT}/超卖${this.config.TREND_ANALYSIS.RSI_OVERSOLD})
 🚀 增强分析: MACD + EMA + 动量分析
+💰 模拟交易: ${this.config.TRADING.DEFAULT_POSITION_SIZE}U仓位，止盈${this.config.TRADING.TAKE_PROFIT_RATIO * 100}%/止损${this.config.TRADING.STOP_LOSS_RATIO * 100}%
 初始价格:
 ${initialPrices.join('\n')}`
     );
@@ -1270,6 +2120,7 @@ ${initialPrices.join('\n')}`
     const finalTrends = [];
     const finalRSI = [];
     const finalSignals = [];
+    const tradeStats = [];
     const fetchStats = [];
 
     for (const coin of this.config.COINS) {
@@ -1282,6 +2133,7 @@ ${initialPrices.join('\n')}`
         `${coinInfo.currentTradingSignal.signal} (${coinInfo.currentTradingSignal.confidence})` : '无信号';
       finalSignals.push(`${coin.name}: ${signal}`);
 
+      tradeStats.push(`${coin.name}: ${coinInfo.tradeStats.totalTrades}次, 胜率${coinInfo.tradeStats.winRate}%, 盈利${coinInfo.tradeStats.totalProfit.toFixed(2)}U`);
       fetchStats.push(`${coin.name}: ${coinInfo.fetchCount}次`);
     }
 
@@ -1296,12 +2148,23 @@ ${finalTrends.join('\n')}
 交易信号:
 ${finalSignals.join('\n')}
 
+交易统计:
+${tradeStats.join('\n')}
+
 RSI数值:
 ${finalRSI.join('\n')}
 
 获取统计:
-${fetchStats.join('\n')}`
+${fetchStats.join('\n')}
+
+全局统计:
+总交易: ${this.globalTradeStats.totalTrades}次
+胜率: ${this.globalTradeStats.winRate}%
+总盈亏: ${this.globalTradeStats.totalProfit.toFixed(2)} USDT`
     );
+
+    // 保存交易历史
+    await this.saveTradeHistory();
 
     console.log(`[${this.getCurrentTimeString()}] 价格监控已停止`);
     process.exit(0);
@@ -1386,6 +2249,103 @@ ${fetchStats.join('\n')}`
   }
 }
 
+/**
+ * 转折点交易管理器（扩展原交易管理器）
+ */
+class TurningPointTradingManager extends TradingManager {
+  constructor(config) {
+    super(config);
+    this.turningPointConfig = config.TRADING.TURNING_POINT_TRADING || {
+      BOTTOM_CONFIRMATION_CANDLES: 2,
+      TOP_CONFIRMATION_CANDLES: 1,
+      REENTRY_ALLOWANCE: 0.005,
+      STOP_LOSS_TIGHTENING: 0.5
+    };
+
+    this.turningPointHistory = new Map(); // 记录转折点历史
+  }
+
+  /**
+   * 开仓交易（优化版，支持转折点交易）
+   */
+  openTrade(symbol, name, signal, entryPrice, confidence, signalType = 'REGULAR', turningPointData = null) {
+    const trade = super.openTrade(symbol, name, signal, entryPrice, confidence);
+
+    // 如果是转折点交易，调整止损策略
+    if (signalType === 'TURNING_POINT' && turningPointData) {
+      const isLong = signal === 'BUY';
+
+      // 转折点交易使用更紧的止损
+      const tighterStopLossRatio = this.config.STOP_LOSS_RATIO * this.turningPointConfig.STOP_LOSS_TIGHTENING;
+
+      trade.stopLossPrice = isLong
+        ? entryPrice * (1 - tighterStopLossRatio)
+        : entryPrice * (1 + tighterStopLossRatio);
+
+      trade.takeProfitRatio = this.config.TAKE_PROFIT_RATIO * 1.5; // 提高止盈比例
+      trade.takeProfitPrice = isLong
+        ? entryPrice * (1 + trade.takeProfitRatio)
+        : entryPrice * (1 - trade.takeProfitRatio);
+
+      trade.signalType = 'TURNING_POINT';
+      trade.turningPointData = turningPointData;
+    }
+
+    return trade;
+  }
+
+  /**
+   * 检查转折点确认
+   */
+  checkTurningPointConfirmation(symbol, currentPrice, signal, turningPointData) {
+    if (!turningPointData) return false;
+
+    const history = this.turningPointHistory.get(symbol) || [];
+
+    // 检查确认K线数量
+    const confirmationCandles = signal === 'BUY'
+      ? this.turningPointConfig.BOTTOM_CONFIRMATION_CANDLES
+      : this.turningPointConfig.TOP_CONFIRMATION_CANDLES;
+
+    // 记录当前价格到历史
+    history.push({
+      price: currentPrice,
+      time: Date.now(),
+      signal: signal
+    });
+
+    // 保持历史记录长度
+    if (history.length > 10) {
+      history.shift();
+    }
+
+    this.turningPointHistory.set(symbol, history);
+
+    // 检查是否满足确认条件
+    if (history.length >= confirmationCandles) {
+      const recentPrices = history.slice(-confirmationCandles);
+
+      if (signal === 'BUY') {
+        // 底部确认：价格持续上涨
+        const allIncreasing = recentPrices.every((price, index) => {
+          if (index === 0) return true;
+          return price.price > recentPrices[index - 1].price;
+        });
+        return allIncreasing;
+      } else {
+        // 顶部确认：价格持续下跌
+        const allDecreasing = recentPrices.every((price, index) => {
+          if (index === 0) return true;
+          return price.price < recentPrices[index - 1].price;
+        });
+        return allDecreasing;
+      }
+    }
+
+    return false;
+  }
+}
+
 // 使用示例
 async function main() {
   try {
@@ -1399,7 +2359,7 @@ async function main() {
     console.log('   • 5分钟趋势分析 (需要15个数据点)');
     console.log('   • RSI指标计算 (14周期)');
     console.log('   • 增强趋势分析: MACD + EMA + 动量分析');
-    console.log('   • 明确交易信号: BUY/SELL/HOLD (CONVICTION/HIGH/MEDIUM/LOW)');
+    console.log('   • 明确交易信号: BUY/SELL/HOLD (CONVICTION高度确信/高/MEDIUM/LOW)');
     console.log('   • 趋势变化实时提醒');
     console.log('   • RSI超买(>80)/超卖(<20)警告');
     console.log('   • 配置热更新支持');
