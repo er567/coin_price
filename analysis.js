@@ -583,13 +583,8 @@ class EnhancedTrendAnalyzer {
     let signalType = 'REGULAR'; // REGULAR 或 TURNING_POINT
 
     // 检查转折点信号（优先）
-    if (conditions.potentialBottom && turningPoints.bottomConfidence > 50) {
-      signal = 'BUY';
-      confidence = turningPoints.bottomConfidence > 70 ? '极度确信' : '高';
-      reason = [`底部转折点检测 (置信度: ${turningPoints.bottomConfidence})`, ...turningPoints.reasons];
-      signalType = 'TURNING_POINT';
-
-    } else if (conditions.potentialTop && turningPoints.topConfidence > 50) {
+    console.log('MACD:', conditions.potentialBottom, turningPoints.bottomConfidence)
+    if (conditions.potentialTop && turningPoints.topConfidence >= 60) {
       signal = 'SELL';
       confidence = turningPoints.topConfidence > 70 ? '极度确信' : '高';
       reason = [`顶部转折点检测 (置信度: ${turningPoints.topConfidence})`, ...turningPoints.reasons];
@@ -1373,38 +1368,42 @@ ${reason.map(r => `• ${r}`).join('\n')}
   cleanupTrendData(symbol) {
     const coinInfo = this.coinData.get(symbol);
     const timeWindowMs = this.config.TREND_ANALYSIS.TIME_WINDOW * 60 * 1000;
-    const minDataPoints = this.config.TREND_ANALYSIS.ENHANCED_TREND?.MIN_DATA_POINTS_FOR_MACD ?? 20;
+    const minDataPoints = this.config.TREND_ANALYSIS.ENHANCED_TREND?.MIN_DATA_POINTS_FOR_MACD || 26;
 
-    // 使用重叠窗口：保留比分析窗口更长的数据
-    const overlapFactor = 1.5; // 保留1.5倍时间窗口的数据
-    const cleanupWindowMs = timeWindowMs * overlapFactor;
-    const cutoffTime = new Date().getTime() - cleanupWindowMs;
-
+    // 重要：修改清理策略，保留更多数据
     const beforeCount = coinInfo.trendData.length;
 
-    // 温和清理：只清理远期的旧数据，保留足够缓冲
-    coinInfo.trendData = coinInfo.trendData.filter(record =>
-      record.timestamp > cutoffTime
+    // 1. 首先确保数据量足够
+    if (coinInfo.trendData.length < minDataPoints * 2) {
+      // 数据不足时，完全不清理
+      console.log(`[数据清理] ${coinInfo.name}数据不足，跳过清理: ${coinInfo.trendData.length}/${minDataPoints * 2}`);
+      return;
+    }
+
+    // 2. 确定要保留的数据点数量
+    const targetDataPoints = Math.max(
+      minDataPoints * 3,  // 至少保留3倍分析所需数据
+      60,                 // 最低60个数据点
+      coinInfo.trendData.length * 0.8  // 最多清理20%
     );
 
-    // 只有在数据量非常大时才进行数量限制
-    const comfortableDataPoints = minDataPoints * 4; // 宽松的数据量上限
-    if (coinInfo.trendData.length > comfortableDataPoints) {
-      // 保留更多的数据点，确保分析连续性
-      const retainPoints = minDataPoints * 3;
-      coinInfo.trendData = coinInfo.trendData.slice(-retainPoints);
+    // 3. 只保留最近的数据点
+    if (coinInfo.trendData.length > targetDataPoints) {
+      coinInfo.trendData = coinInfo.trendData.slice(-targetDataPoints);
     }
 
-    if (beforeCount !== coinInfo.trendData.length) {
-      console.log(`[${this.getCurrentTimeString()}] 温和清理${coinInfo.name}: ${beforeCount} -> ${coinInfo.trendData.length} (保留${overlapFactor}倍窗口)`);
+    const afterCount = coinInfo.trendData.length;
+
+    if (beforeCount !== afterCount) {
+      console.log(`[数据清理] ${coinInfo.name}: ${beforeCount} -> ${afterCount} (保留${afterCount}个点)`);
     }
 
-    // 记录数据状态
+    // 记录当前数据状态
     const currentDataPoints = coinInfo.trendData.length;
     if (currentDataPoints < minDataPoints) {
-      console.log(`[${this.getCurrentTimeString()}] 📊 ${coinInfo.name}数据积累中: ${currentDataPoints}/${minDataPoints}`);
+      console.log(`[数据状态] ${coinInfo.name}数据积累中: ${currentDataPoints}/${minDataPoints}`);
     } else if (currentDataPoints >= minDataPoints) {
-      console.log(`[${this.getCurrentTimeString()}] ✅ ${coinInfo.name}数据充足: ${currentDataPoints}个数据点`);
+      console.log(`[数据状态] ✅ ${coinInfo.name}数据充足: ${currentDataPoints}个数据点`);
     }
   }
 
@@ -1550,7 +1549,7 @@ ${reason.map(r => `• ${r}`).join('\n')}
 
     // 只在HIGH或CONVICTION信号时开仓
     if (tradingSignal.signal !== 'HOLD' &&
-      (tradingSignal.confidence === '高' || tradingSignal.confidence === '极度确信')) {
+      (tradingSignal.confidence === '极度确信')) {
       await this.sendTradingSignalAlert(analysis, enhancedAnalysis, tradingSignal);
       coinInfo.lastTrendAlert = now;
       coinInfo.lastTradingSignalAlert = now;
@@ -1572,7 +1571,7 @@ ${reason.map(r => `• ${r}`).join('\n')}
 
     // 只有在HIGH或CONVICTION时开仓
     const shouldTrade = (signal === 'BUY' || signal === 'SELL') &&
-      (confidence === '高' || confidence === '极度确信' || signalType === 'TURNING_POINT');
+      (confidence === '极度确信' || signalType === 'TURNING_POINT');
 
     switch (signal) {
       case 'BUY':
@@ -1653,7 +1652,43 @@ ${reason.map(r => `• ${r}`).join('\n')}
         console.log(`[${this.getCurrentTimeString()}] 💰 模拟开仓: ${analysis.name} ${trade.type} @ ${trade.entryPrice.toFixed(6)}`);
       } else {
         if (hasActiveTrades) {
-          console.log(`[${this.getCurrentTimeString()}] ⏰ ${analysis.name}已有${activeTradesCount}个活跃交易，跳过开仓`);
+          const currentPrice = analysis.currentPrice;
+          // 构建当前仓位信息
+          const activeTradesInfo = coinInfo.activeTrades.map((trade, index) => {
+            const profit = trade.currentProfit || 0;
+            const profitPercent = trade.profitPercentage || 0;
+            const profitColor = profit >= 0 ? '🟢' : '🔴';
+            const profitSymbol = profit >= 0 ? '+' : '';
+
+            return `
+🎯 仓位 ${index + 1}:
+  方向: ${trade.type}
+  入场价: ${trade.entryPrice.toFixed(6)}
+  当前价: ${currentPrice.toFixed(6)}
+  盈亏: ${profitSymbol}${profit.toFixed(2)} USDT (${profitSymbol}${profitPercent.toFixed(2)}%)
+  止盈价: ${trade.takeProfitPrice.toFixed(6)}
+  止损价: ${trade.stopLossPrice.toFixed(6)}
+  持仓时间: ${Math.round((Date.now() - trade.entryTime) / 60000)}分钟`;
+          }).join('\n');
+
+          // 推送仓位提醒
+          const positionTitle = `💰 ${analysis.name}当前持仓 (${activeTradesCount}个仓位)`;
+          const positionMessage = `[${this.getCurrentTimeString()}]
+${analysis.name}已有${activeTradesCount}个活跃交易，跳过开仓
+
+📊 当前持仓详情:
+${activeTradesInfo}
+
+📈 累计统计:
+总仓位: ${activeTradesCount}个
+入场均价: ${coinInfo.activeTrades.reduce((sum, t) => sum + t.entryPrice, 0) / activeTradesCount}
+累计盈亏: ${coinInfo.activeTrades.reduce((sum, t) => sum + (t.currentProfit || 0), 0).toFixed(2)} USDT
+最大持仓时间: ${Math.max(...coinInfo.activeTrades.map(t => Date.now() - t.entryTime)) / 60000}分钟`;
+
+          // 发送仓位提醒
+          await this.sendPushNotification(positionTitle, positionMessage);
+
+          console.log(`[${this.getCurrentTimeString()}] ⏰ ${analysis.name}已有${activeTradesCount}个活跃交易，已推送仓位信息`);
         }
         await this.sendPushNotification(title, message);
       }
